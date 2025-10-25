@@ -1,0 +1,559 @@
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Camera = game:GetService("Workspace").CurrentCamera
+
+local plr = Players.LocalPlayer
+local chr = plr.Character or plr.CharacterAdded:Wait()
+local hum = chr:WaitForChild("Humanoid")
+local root = chr:WaitForChild("HumanoidRootPart")
+local basePos = nil
+local originalCameraSubject = Camera.CameraSubject
+
+-- Set basePos to DeliveryHitbox center
+local function setBaseToDeliveryHitbox()
+    local plots = workspace:FindFirstChild("Plots")
+    if plots then
+        for _, plot in ipairs(plots:GetChildren()) do
+            local plotSign = plot:FindFirstChild("PlotSign")
+            if plotSign then
+                local surfaceGui = plotSign:FindFirstChild("SurfaceGui")
+                if surfaceGui then
+                    local frame = surfaceGui:FindFirstChild("Frame")
+                    if frame then
+                        local textLabel = frame:FindFirstChild("TextLabel")
+                        if textLabel and textLabel.Text == plr.DisplayName .. "'s Base" then
+                            local deliveryHitbox = plot:FindFirstChild("DeliveryHitbox")
+                            if deliveryHitbox and deliveryHitbox:IsA("BasePart") then
+                                basePos = deliveryHitbox.Position
+                                return
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    basePos = root.Position + root.CFrame.LookVector * 2
+end
+setBaseToDeliveryHitbox()
+
+-- Handle respawn
+plr.CharacterAdded:Connect(function(newChar)
+    task.wait(1)
+    chr = newChar
+    hum = chr:WaitForChild("Humanoid")
+    root = chr:WaitForChild("HumanoidRootPart")
+    hum:UnequipTools()
+    -- Remove RagdollClient or Ragdoll Client
+    for _, script in ipairs(chr:GetChildren()) do
+        if script:IsA("Script") and (script.Name == "RagdollClient" or script.Name == "Ragdoll Client") then
+            script:Destroy()
+        end
+    end
+    -- Reset camera subject
+    if stealFloorEnabled then
+        pcall(function()
+            Camera.CameraSubject = root
+        end)
+    else
+        Camera.CameraSubject = hum
+    end
+end)
+
+-- Remove RagdollClient from StarterCharacterScripts
+local starterCharacterScripts = game:GetService("StarterPlayer"):WaitForChild("StarterCharacterScripts")
+for _, script in ipairs(starterCharacterScripts:GetChildren()) do
+    if script:IsA("Script") and (script.Name == "RagdollClient" or script.Name == "Ragdoll Client") then
+        script:Destroy()
+    end
+end
+
+-- Anti-Ragdoll (lock Humanoid state to Running)
+local function setAntiRagdoll()
+    hum:ChangeState(Enum.HumanoidStateType.Running)
+    hum.StateChanged:Connect(function(oldState, newState)
+        if newState == Enum.HumanoidStateType.Ragdoll or newState == Enum.HumanoidStateType.FallingDown then
+            hum:ChangeState(Enum.HumanoidStateType.Running)
+        end
+    end)
+end
+setAntiRagdoll()
+
+-- Player ESP
+local function addESP(player)
+    if player == plr then return end
+    local function onCharacterAdded(char)
+        local highlight = Instance.new("Highlight")
+        highlight.Parent = char
+        highlight.FillTransparency = 0.5
+        highlight.FillColor = Color3.fromRGB(255, 0, 0)
+        highlight.OutlineTransparency = 0
+        highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+        local bb = Instance.new("BillboardGui")
+        bb.Parent = char:WaitForChild("Head")
+        bb.Adornee = char.Head
+        bb.Size = UDim2.new(0, 150, 0, 40)
+        bb.StudsOffset = Vector3.new(0, 2, 0)
+        bb.AlwaysOnTop = true
+        local text = Instance.new("TextLabel", bb)
+        text.Size = UDim2.new(1, 0, 1, 0)
+        text.BackgroundTransparency = 1
+        text.Text = player.Name
+        text.TextColor3 = Color3.new(1, 1, 1)
+        text.TextSize = 12
+    end
+    player.CharacterAdded:Connect(onCharacterAdded)
+    if player.Character then
+        onCharacterAdded(player.Character)
+    end
+end
+
+for _, p in ipairs(Players:GetPlayers()) do
+    addESP(p)
+end
+Players.PlayerAdded:Connect(addESP)
+
+-- Generation ESP
+local function addGenerationESP()
+    local function addLabelESP(label)
+        if label and label:IsA("TextLabel") then
+            local highlight = Instance.new("Highlight")
+            highlight.Parent = label.Parent
+            highlight.FillTransparency = 0.5
+            highlight.FillColor = Color3.fromRGB(0, 255, 0)
+            highlight.OutlineTransparency = 0
+            highlight.OutlineColor = Color3.fromRGB(255, 255, 0)
+        end
+    end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj.Name == "Generation" and obj:IsA("TextLabel") then
+            addLabelESP(obj)
+            local displayNameLabel = obj.Parent:FindFirstChild("DisplayName")
+            addLabelESP(displayNameLabel)
+        end
+    end
+end
+addGenerationESP()
+
+-- GUI Setup
+local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
+ScreenGui.Name = "ThyroxideUI"
+
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 200, 0, 250)
+Frame.Position = UDim2.new(0.4, 0, 0.4, 0)
+Frame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+Frame.BackgroundTransparency = 0.4
+Frame.Active = true
+Frame.Draggable = true
+Frame.Parent = ScreenGui
+Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 10)
+
+local Title = Instance.new("TextLabel", Frame)
+Title.Text = "Corruption"
+Title.Size = UDim2.new(1, 0, 0, 25)
+Title.BackgroundTransparency = 1
+Title.Font = Enum.Font.Arcade
+Title.TextSize = 20
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+
+-- Buttons Helper
+local function createBtn(text, y)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0.9, 0, 0, 28)
+    b.Position = UDim2.new(0.05, 0, y, 0)
+    b.BackgroundColor3 = Color3.fromRGB(60, 0, 90)
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.Font = Enum.Font.Arcade
+    b.TextSize = 16
+    b.Text = text
+    b.Parent = Frame
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+    return b
+end
+
+local Desync = createBtn("Desync [OFF]", 0.15)
+local AutoSentry = createBtn("Auto Destroy Sentry [OFF]", 0.28)
+local AutoHit = createBtn("Auto Hit [OFF]", 0.41)
+local FloatBtn = createBtn("Float [OFF]", 0.54)
+local GoBase = createBtn("Go To Base [OFF]", 0.67)
+local StealFloor = createBtn("Steal Floor [OFF]", 0.80)
+
+-- Features
+local floatEnabled = false
+local goBaseEnabled = false
+local autoSentryEnabled = false
+local autoHitEnabled = false
+local desyncEnabled = false
+local stealFloorEnabled = false
+local selectedTool = nil
+local floatingButton = nil
+local dropdownFrame = nil
+local floatPart = nil
+local isGoingToBase = false
+local alignPos = nil
+local attach0 = nil
+local attach1 = nil
+local dummy = nil
+local alignOri = nil
+local desyncIndicator = nil
+local fakePosHighlight = nil
+local fakePosGui = nil
+local clone = nil
+local desyncConnection = nil
+
+-- Float (platform, no upward movement)
+local function setFloat(on)
+    if on and not floatPart then
+        floatPart = Instance.new("Part")
+        floatPart.Size = Vector3.new(6, 1, 6)
+        floatPart.Anchored = true
+        floatPart.Transparency = 0.6
+        floatPart.Material = Enum.Material.ForceField
+        floatPart.Color = Color3.fromRGB(150, 150, 255)
+        floatPart.CanCollide = true
+        floatPart.Parent = workspace
+        task.spawn(function()
+            while floatEnabled and floatPart do
+                pcall(function()
+                    floatPart.Position = root.Position - Vector3.new(0, 3.2, 0)
+                end)
+                task.wait(0.05)
+            end
+        end)
+    elseif not on and floatPart then
+        floatPart:Destroy()
+        floatPart = nil
+    end
+end
+
+FloatBtn.MouseButton1Click:Connect(function()
+    if stealFloorEnabled then
+        return -- Prevent manual float toggle if Steal Floor is active
+    end
+    floatEnabled = not floatEnabled
+    FloatBtn.Text = "Float [" .. (floatEnabled and "ON" or "OFF") .. "]"
+    setFloat(floatEnabled)
+end)
+
+-- Auto Destroy Sentry
+AutoSentry.MouseButton1Click:Connect(function()
+    autoSentryEnabled = not autoSentryEnabled
+    AutoSentry.Text = "Auto Destroy Sentry [" .. (autoSentryEnabled and "ON" or "OFF") .. "]"
+    if autoSentryEnabled then
+        task.spawn(function()
+            while autoSentryEnabled and hum and root do
+                local bat = plr.Backpack:FindFirstChild("Bat") or chr:FindFirstChild("Bat")
+                if bat then
+                    if not chr:FindFirstChild("Bat") then
+                        hum:EquipTool(bat)
+                        task.wait(0.5)
+                    end
+                    for _, obj in ipairs(workspace:GetChildren()) do
+                        if obj:IsA("BasePart") and obj.Name:find("Sentry") then
+                            local distance = (obj.Position - root.Position).Magnitude
+                            if distance < 75 then
+                                obj.CanCollide = false
+                                for i = 1, 3 do
+                                    obj.Position = root.Position + Vector3.new(0, 0, 2)
+                                    bat:Activate()
+                                    task.wait(0.2)
+                                end
+                            end
+                        end
+                    end
+                end
+                task.wait(0.5)
+            end
+        end)
+    end
+end)
+
+-- Stop Go To Base
+local function stopGoToBase(originalWalkSpeed)
+    if isGoingToBase then
+        isGoingToBase = false
+        goBaseEnabled = false
+        GoBase.Text = "Go To Base [OFF]"
+        if alignPos then
+            alignPos:Destroy()
+            alignPos = nil
+        end
+        if alignOri then
+            alignOri:Destroy()
+            alignOri = nil
+        end
+        if attach0 then
+            attach0:Destroy()
+            attach0 = nil
+        end
+        if attach1 then
+            attach1:Destroy()
+            attach1 = nil
+        end
+        if dummy then
+            dummy:Destroy()
+            dummy = nil
+        end
+        if root then
+            root.Velocity = Vector3.new(0, root.Velocity.Y, 0)
+        end
+        if hum then
+            hum.WalkSpeed = originalWalkSpeed
+        end
+    end
+end
+
+-- Go To Base
+GoBase.MouseButton1Click:Connect(function()
+    if not basePos then
+        GoBase.Text = "❌ No Base Set!"
+        task.wait(2)
+        GoBase.Text = "Go To Base [OFF]"
+        return
+    end
+    if not hum or not root then
+        return
+    end
+    goBaseEnabled = not goBaseEnabled
+    GoBase.Text = "Go To Base [" .. (goBaseEnabled and "ON" or "OFF") .. "]"
+    if not goBaseEnabled then
+        stopGoToBase(hum.WalkSpeed)
+        return
+    end
+    if isGoingToBase then
+        return
+    end
+    isGoingToBase = true
+    if floatEnabled then
+        floatEnabled = false
+        setFloat(false)
+        FloatBtn.Text = "Float [OFF]"
+    end
+    local currentY = root.Position.Y
+    local targetPosition = Vector3.new(basePos.X, currentY, basePos.Z)
+    dummy = Instance.new("Part")
+    dummy.Anchored = true
+    dummy.Transparency = 1
+    dummy.CanCollide = false
+    dummy.Position = targetPosition
+    dummy.CFrame = CFrame.new(targetPosition, targetPosition + root.CFrame.LookVector)
+    dummy.Parent = workspace
+    attach0 = Instance.new("Attachment")
+    attach0.Parent = root
+    attach1 = Instance.new("Attachment")
+    attach1.Parent = dummy
+    alignPos = Instance.new("AlignPosition")
+    alignPos.Attachment0 = attach0
+    alignPos.Attachment1 = attach1
+    alignPos.MaxForce = math.huge
+    alignPos.MaxVelocity = 20
+    alignPos.Responsiveness = 200
+    alignPos.Parent = root
+    alignOri = Instance.new("AlignOrientation")
+    alignOri.Attachment0 = attach0
+    alignOri.Attachment1 = attach1
+    alignOri.MaxTorque = math.huge
+    alignOri.Responsiveness = 200
+    alignOri.Parent = root
+    local originalWalkSpeed = hum.WalkSpeed
+    hum.WalkSpeed = 0
+    local maxWaitTime = 30
+    local startTime = tick()
+    while goBaseEnabled and (root.Position - targetPosition).Magnitude > 1 and (tick() - startTime) < maxWaitTime do
+        if not root or not hum then
+            stopGoToBase(originalWalkSpeed)
+            break
+        end
+        local nearbyMedusa = false
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= plr and p.Character then
+                local targetRoot = p.Character:FindFirstChild("HumanoidRootPart")
+                if targetRoot then
+                    local distance = (targetRoot.Position - root.Position).Magnitude
+                    if distance < 20 then
+                        local medusa = p.Character:FindFirstChild("Medusa Head")
+                        if medusa then
+                            nearbyMedusa = true
+                            break
+                        end
+                    end
+                end
+            end
+        end
+        if nearbyMedusa then
+            root.Position = root.Position + Vector3.new(0, 20, 0)
+            currentY = root.Position.Y
+            targetPosition = Vector3.new(basePos.X, currentY, basePos.Z)
+            dummy.Position = targetPosition
+        end
+        task.wait(0.05)
+    end
+    stopGoToBase(originalWalkSpeed)
+end)
+
+-- Get closest player
+local function getClosestPlayer(maxDist)
+    local closest = nil
+    local min = maxDist
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= plr and p.Character then
+            local targetRoot = p.Character:FindFirstChild("HumanoidRootPart")
+            if targetRoot then
+                local dist = (targetRoot.Position - root.Position).Magnitude
+                if dist < min then
+                    min = dist
+                    closest = p.Character
+                end
+            end
+        end
+    end
+    return closest
+end
+
+-- Dropdown for Auto Hit
+local function showDropdown()
+    if dropdownFrame then
+        dropdownFrame:Destroy()
+        dropdownFrame = nil
+    end
+    local tools = plr.Backpack:GetChildren()
+    local toolCount = 0
+    for _, tool in ipairs(tools) do
+        if tool:IsA("Tool") then
+            toolCount = toolCount + 1
+        end
+    end
+    local dropdownHeight = 20 + (28 + 5) * toolCount
+    dropdownFrame = Instance.new("Frame")
+    dropdownFrame.Size = UDim2.new(0, 180, 0, dropdownHeight)
+    dropdownFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+    dropdownFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    dropdownFrame.BackgroundTransparency = 0.4
+    dropdownFrame.Active = true
+    dropdownFrame.Draggable = true
+    dropdownFrame.Parent = ScreenGui
+    Instance.new("UICorner", dropdownFrame).CornerRadius = UDim.new(0, 10)
+    local dragBar = Instance.new("Frame")
+    dragBar.Size = UDim2.new(1, 0, 0, 20)
+    dragBar.Position = UDim2.new(0, 0, 0, 0)
+    dragBar.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+    dragBar.Parent = dropdownFrame
+    Instance.new("UICorner", dragBar).CornerRadius = UDim.new(0, 10)
+    local dragTitle = Instance.new("TextLabel", dragBar)
+    dragTitle.Size = UDim2.new(1, 0, 1, 0)
+    dragTitle.BackgroundTransparency = 1
+    dragTitle.Text = "Select Tool"
+    dragTitle.TextColor3 = Color3.new(1, 1, 1)
+    dragTitle.Font = Enum.Font.Arcade
+    dragTitle.TextSize = 12
+    local listLayout = Instance.new("UIListLayout")
+    listLayout.Parent = dropdownFrame
+    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    listLayout.Padding = UDim.new(0, 5)
+    listLayout.FillDirection = Enum.FillDirection.Vertical
+    listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    listLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+    for _, tool in ipairs(tools) do
+        if tool:IsA("Tool") then
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.new(1, 0, 0, 28)
+            btn.BackgroundColor3 = Color3.fromRGB(60, 0, 90)
+            btn.TextColor3 = Color3.new(1, 1, 1)
+            btn.Font = Enum.Font.Arcade
+            btn.TextSize = 14
+            btn.Text = tool.Name
+            btn.Parent = dropdownFrame
+            Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+            btn.MouseButton1Click:Connect(function()
+                selectedTool = tool
+                AutoHit.Text = "Auto Hit [ON] - " .. tool.Name
+                dropdownFrame:Destroy()
+                dropdownFrame = nil
+                if floatingButton then
+                    floatingButton:Destroy()
+                    floatingButton = nil
+                end
+                floatingButton = Instance.new("TextButton")
+                floatingButton.Size = UDim2.new(0, 50, 0, 50)
+                floatingButton.Position = UDim2.new(0.9, 0, 0.9, 0)
+                floatingButton.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+                floatingButton.Text = "Hit"
+                floatingButton.TextColor3 = Color3.new(1, 1, 1)
+                floatingButton.Font = Enum.Font.Arcade
+                floatingButton.TextSize = 18
+                floatingButton.Active = true
+                floatingButton.Draggable = true
+                floatingButton.Parent = ScreenGui
+                Instance.new("UICorner", floatingButton).CornerRadius = UDim.new(0, 10)
+                floatingButton.MouseButton1Click:Connect(function()
+                    if selectedTool then
+                        local equipped = chr:FindFirstChild(selectedTool.Name)
+                        if not equipped then
+                            hum:EquipTool(selectedTool)
+                            task.wait(0.5)
+                        end
+                        selectedTool:Activate()
+                        task.wait(0.1)
+                        local closestChar = getClosestPlayer(100)
+                        if closestChar then
+                            local targetRoot = closestChar:FindFirstChild("HumanoidRootPart")
+                            if targetRoot then
+                                local rightLowerArm = chr:FindFirstChild("RightLowerArm")
+                                if rightLowerArm then
+                                    rightLowerArm.CFrame = targetRoot.CFrame
+                                end
+                                root.CFrame = CFrame.new(root.Position, targetRoot.Position)
+                            end
+                        end
+                    end
+                end)
+            end)
+        end
+    end
+end
+
+-- Auto Hit Toggle
+AutoHit.MouseButton1Click:Connect(function()
+    autoHitEnabled = not autoHitEnabled
+    AutoHit.Text = "Auto Hit [" .. (autoHitEnabled and "ON" or "OFF") .. "]"
+    if autoHitEnabled then
+        showDropdown()
+    else
+        if dropdownFrame then
+            dropdownFrame:Destroy()
+            dropdownFrame = nil
+        end
+        if floatingButton then
+            floatingButton:Destroy()
+            floatingButton = nil
+        end
+        selectedTool = nil
+    end
+end)
+
+-- Desync Toggle
+Desync.MouseButton1Click:Connect(function()
+    desyncEnabled = not desyncEnabled
+    Desync.Text = "Desync [" .. (desyncEnabled and "ON" or "OFF") .. "]"
+    if desyncEnabled then
+        desyncIndicator = Instance.new("TextLabel")
+        desyncIndicator.Size = UDim2.new(0, 80, 0, 30)
+        desyncIndicator.Position = UDim2.new(1, -90, 0, 10)
+        desyncIndicator.BackgroundTransparency = 1
+        desyncIndicator.Text = "Desync ON"
+        desyncIndicator.TextColor3 = Color3.new(1, 1, 1)
+        desyncIndicator.TextTransparency = 0.3
+        desyncIndicator.Font = Enum.Font.Arcade
+        desyncIndicator.TextSize = 12
+        desyncIndicator.Parent = ScreenGui
+
+        pcall(function()
+            local quantumCloner = plr.Backpack:FindFirstChild("Quantum Cloner") or chr:FindFirstChild("Quantum Cloner")
+            if quantumCloner then
+                hum:EquipTool(quantumCloner)
+                task.wait(0.5)
+                game:GetService
